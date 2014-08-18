@@ -26,14 +26,15 @@ function find_broken_process()
 {
 
 #record process state in now
-if [ -f /tmp/proc_record$1.txt ];then
-        rm /tmp/proc_record$1.txt 2>/dev/null
+if [ -f /nas/tmp/proc_record$1.txt ];then
+    rm /nas/tmp/proc_record$1.txt 2>/dev/null
 fi
-touch /tmp/proc_record$1.txt
+touch /nas/tmp/proc_record$1.txt
 
-test ! -f /tmp/proc_ref$1.txt && touch /tmp/proc_ref$1.txt		# record state at last time
+test ! -f /nas/tmp/proc_ref$1.txt && touch /nas/tmp/proc_ref$1.txt		# record state at last time
 
 declare -i count=0         #count process.
+need_reboot="false"
 #process state on Zombie or Dead
 psx_state=$1
 while read line
@@ -44,33 +45,42 @@ do
 	
 	if [ "$pid" != "" ];then
 	
-		count=`cat /tmp/proc_ref$1.txt | awk -v pd=$pid '{if($1==pd && $2==st) printf "%s",$4}' st=$psx_state`		#search last time state in proc_ref$1.txt
+		count=`cat /nas/tmp/proc_ref$1.txt | awk -v pd=$pid '{if($1==pd && $2==st) printf "%s",$4}' st=$psx_state`		#search last time state in proc_ref$1.txt
 		count=${count:-0}											
 		count=`expr $count+1`
-		echo $pid $psx_state $proc_name $count >> /tmp/proc_record$1.txt												#save now state
+		echo $pid $psx_state $proc_name $count >> /nas/tmp/proc_record$1.txt												#save now state
 						
 	fi
 
-done< /nas/tmp/psx.1
+done< /nas/tmp/psx.result
+
 	#save zombie or Dead process log to /DOM/.wdog.log
-	`cat /tmp/proc_record$1.txt > /tmp/proc_ref$1.txt`
-	if [ "$str" != "" ];then
-        echo `date` >> /DOM/.wdog.log
-        `cat /tmp/proc_ref$1.txt >> /DOM/.wdog.log`
-        echo "" >>/DOM/.wdog.log
-    fi
-	
+	`cat /nas/tmp/proc_record$1.txt > /nas/tmp/proc_ref$1.txt`
 	#check if need reboot.
 	while read line
 	do
 		count=`echo $line|awk '{print $4}'`
 		if [ $count -gt 10 ];then
-			rm /DOM/.nasboot 2>/dev/null
-			rm /DOM/.fsrepair 2>/dev/null
-			echo "Find Zombie process $line ! Reboot now! >> /DOM/.wdog.log"
-			echo "Reboot now cmd"
+			echo `date "+%Y %m %d %H:%M:%S"` >> /DOM/.wdog.log
+			echo "Find Zombie process $line !" >> /DOM/.wdog.log
+			echo "" >>/DOM/.wdog.log
+			need_reboot="true"
 		fi
-	done < /tmp/proc_ref$1.txt
+	done < /nas/tmp/proc_ref$1.txt
+	
+	if [ "$need_reboot" == "true" ]&&[ $1 == "Z" ];then
+		echo "Find Zombie process ! Please check /DOM/.wdog.log log"
+		echo "Reboot by Watch dog..." >>/DOM/.wdog.log
+		echo "Reboot by Watch dog..."
+		sleep 5
+		do_reboot
+	elif [ "$need_reboot" == "true" ]&&[ $1 == "D" ];then
+		echo "Find Dead process ! Please check /DOM/.wdog.log log"
+		echo "Reboot by Watch dog..." >>/DOM/.wdog.log
+		echo "Reboot by Watch dog..."
+		sleep 5
+		do_reboot
+	fi
 
 }
 
@@ -80,54 +90,49 @@ function find_filesystem_error()
 		`echo >>/DOM/.wdog.log`
 		echo -e`date`"\n" Detect XFS ERROR : $str >> /DOM/.wdog.log
 		touch /DOM/.fsrepair
+		echo "Detect XFS error! Reboot for file system check !"
+		do_reboot
 	fi
 	
 	if str=`grep "EXT3-fs error" /nas/tmp/dmesg.result`;then
 		`echo >>/DOM/.wdog.log`
 		echo -e`date`"\n" Detect EXT3-fs ERROR : $str >> /DOM/.wdog.log
 		touch /DOM/.fsrepair
+		echo "Detect EXT3-fs error ! Reboot for file system check!"
+		do_reboot
 	fi
 	
 	if str=`grep "EXT4-fs error" /nas/tmp/dmesg.result`;then
 		`echo >>/DOM/.wdog.log`
 		echo -e`date`"\n" Detect EXT4 ERROR : $str >> /DOM/.wdog.log
 		touch /DOM/.fsrepair
+		echo "Detect EXT4 error! Reboot for file system check!"
+		do_reboot
 	fi
 	
 	if str=`grep "Kernel panic" /nas/tmp/dmesg.result`;then
 		`echo >>/DOM/.wdog.log`
 		echo -e`date`"\n" Detect KERNEL PANIC ERROR : $str >> /DOM/.wdog.log
 		touch /DOM/.fsrepair
+		echo "Detect Kernel panic ! Reboot !"
+		do_reboot
 	fi
 	
 	if str=`grep "Call Trace" /nas/tmp/dmesg.result`;then
 		`echo >>/DOM/.wdog.log`
 		echo -e`date`"\n" Detect KERNEL CALL TRACE ERROR : $str >> /DOM/.wdog.log
 		touch /DOM/.fsrepair
+		echo "Detect kernel call trace error! Reboot"
+		do_reboot
 	fi
 	
 }
 
 function do_reboot()
 {
+	touch /nas/tmp/hwdogfreboot     # stopAllSvc will not stop bash
 	`sync &`
-	cd /root
-	for SVC in cron afp smbd rsync nfs-kernel-server ddclient
-	do
-		/etc/init.d/${SVC} stop
-	done
-
-	ruby /usr/ruby/runMonitor.rb stop
-	killall ruby
-	killall profamd
-	killall lcd2usb
-	killall udevd
-	killall irqbalance
-	killall MCS
-	killall remoteCommSvr
-	killall ipwatchd
-	killall mysqld
-
+	`stopAllSvc`
 	`sleep 10`
 	`forcereboot`
 }
