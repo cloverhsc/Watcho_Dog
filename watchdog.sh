@@ -130,7 +130,7 @@ function find_filesystem_error()
 
 function do_reboot()
 {
-	touch /nas/tmp/hwdogfreboot     # stopAllSvc will not stop bash
+	touch /nas/tmp/hwfreboot     # stopAllSvc will not stop bash
 	`sync &`
 	`stopAllSvc`
 	`sleep 10`
