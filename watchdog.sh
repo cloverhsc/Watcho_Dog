@@ -118,7 +118,7 @@ function do_reboot()
 	touch /nas/tmp/hwfreboot     # stopAllSvc will not stop bash
 	declare -i count=`cat /DOM/.wdogrbt.log |awk -F ":" '{print $2}'`
 	count=$(( $count + 1 ))
-	echo "WatchDog reboot count:$count" > /vol/test/count
+	echo "WatchDog reboot count:$count" > /DOM/.wdogrbt.log
 	`sync &`
 	`stopAllSvc`
 	`sleep 10`
@@ -129,11 +129,11 @@ function do_reboot()
 test ! -f /DOM/.wdogrbt.log && echo "WatchDog reboot count:0" > /DOM/.wdogrbt.log
 test ! -f /DOM/.nasboot && touch /DOM/.nasboot
 test -f /DOM/.fsrepair && rm /DOM/.fsrepair 2>/dev/null
-declare -i count=`cat /vol/test/count |awk -F ":" '{print $2}'`
+declare -i count=`cat /DOM/.wdogrbt.log |awk -F ":" '{print $2}'`
 
 #every 2 mins clear watch dog. So every 10 clear times => pass by 20 mins
 declare -i is20mins=0;				
-
+/sbin/hwdog init
 for ((;;))
 do
 		#first check reboot times by watch dog
@@ -153,9 +153,12 @@ do
         `ps -o pid,tty,stat,user,time,args > /nas/tmp/psx.result`   # equal to psx > /nas/tmp/psx.result
         find_broken_process Z
         find_broken_process D
+		dmesg > /nas/tmp/dmesg.result
+		find_filesystem_error
         #cc=`expr $cc + 1 `
         #echo $cc
         sleep 120
+		/sbin/hwdog clear
 		is20mins=$(( $is20mins + 1 ))
 done
 
