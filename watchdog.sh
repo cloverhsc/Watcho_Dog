@@ -1,25 +1,5 @@
 #!/bin/bash
 #######################################################################################
-#boot
-#if [ -f /DOM/.nasboot ] | [ -f /DOM/.fsrepair ];then
-
-#       echo "do FS repair and show on LCD! "
-#       echo "Write to log /DOM/.wdog.log"
-#fi
-
-#touch /DOM/.nasboot
-#echo "hwdog init"
-#echo "hwdog start monitor !"
-
-#if [ -f /nas/tmp/psx.result ];then
-#       while read line
-#       do
-#               echo $line
-
-#       done< /nas/tmp/psx.result
-
-#fi
-########################################################################################
 
 #function find_broken_process()  need 1 parameter for check process state . if "D" => dead process , "Z"=> zombie process
 function find_broken_process()
@@ -134,7 +114,7 @@ function find_filesystem_error()
 
 function do_reboot()
 {
-	test ! -f /DOM/.wdogrbt.log && echo "WatchDog reboot count:0" > /DOM/.wdogrbt.log
+	test ! -f /DOM/.wdogrbt.log && echo "WatchDog reboot count:1" > /DOM/.wdogrbt.log
 	touch /nas/tmp/hwfreboot     # stopAllSvc will not stop bash
 	declare -i count=`cat /DOM/.wdogrbt.log |awk -F ":" '{print $2}'`
 	count=$(( $count + 1 ))
@@ -142,7 +122,7 @@ function do_reboot()
 	`sync &`
 	`stopAllSvc`
 	`sleep 10`
-	`forcereboot`
+	init 6
 }
 
 # ------------------Start here--------------------------
@@ -173,8 +153,8 @@ do
         `ps -o pid,tty,stat,user,time,args > /nas/tmp/psx.result`   # equal to psx > /nas/tmp/psx.result
         find_broken_process Z
         find_broken_process D
-        cc=`expr $cc + 1 `
-        echo $cc
+        #cc=`expr $cc + 1 `
+        #echo $cc
         sleep 120
 		is20mins=$(( $is20mins + 1 ))
 done
