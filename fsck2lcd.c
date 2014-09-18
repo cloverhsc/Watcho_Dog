@@ -272,14 +272,48 @@ void flush_cursor(int blink,int length,int index, char *kstring){
 	}
 }
 
-/*** get volume name & progress % ************
- show on LCD for watch dog do fsck in booting
+/**************************************************
+fsck.xfs don't have progress bar
+**************************************************/
+
+void get_xfs_fsckmsg(char *source,Print_To_LCD *pt)
+{
+	char *CutFsckMsg,*Phase,*msg;
+	CutFsckMsg=strtok(source,"-");
+	FILE *log;
+	log=fopen("/DOM/.fsck.log","a+");
+	
+	if(log ==NULL)
+		return ;
+
+	while(CutFsckMsg)
+	{
+		fputs(CutFsckMsg,log);
+		fputs(" ",log);
+		Phase=strtok(CutFsckMsg,"Phase");		//find Phase
+
+		if(Phase)					// get next stage
+		{
+			snprintf(pt->progress,10,"P %s",Phase);
+		}
+		CutFsckMsg=strtok(NULL,"-");
+		
+	}
+	fclose(log);
+	
+}
+
+/*********************************************
+ get volume name & progress % to show on LCD 
+ for watch dog do fsck in booting
 **********************************************/
 void get_vol_prgs(char *source,const char *delim,Print_To_LCD *pt)
 {
 	char *CutFsckMsg,*FindVG=NULL,*FindPRG=NULL;
         CutFsckMsg=strtok(source,delim);                //cut to token
 	FILE *log;
+	memset(pt->volume,'\0',sizeof(pt->volume));
+	memset(pt->progress,'\0',sizeof(pt->progress));
 	log = fopen("/DOM/.fsck.log","a+");
 	if( log== NULL)
 		return ;
@@ -291,32 +325,55 @@ void get_vol_prgs(char *source,const char *delim,Print_To_LCD *pt)
                 FindVG=strstr(CutFsckMsg,"VG");         //find out token with VG string
                 FindPRG=strstr(CutFsckMsg,"%");         //find out the token have "%"
 
-                /*********CutFsckMsg will be device path like: /dev/zvol/VG01/shared
-                so we need get the "VGxx/xxx" from pathname like:"VG01/shared"  
+		/********************************************************************
+                     CutFsckMsg will be device path like: /dev/zvol/VG01/shared
+                     so we need get the "VGxx/xxx" from pathname like:"VG01/shared"  
 		*********************************************************************/
 
                 if(FindVG)                      //get VGXX in pathname
                 {
-                        sprintf(pt->volume,"check %s",FindVG);        //save string after "VG"
+                        snprintf(pt->volume,10,"check %s",FindVG);        //save VG pathname. only can show 16 Chars on a line on LCD.
                         FindVG=NULL;
                 }
                 else if(FindPRG)                                // save "yy%" to struct
                 {
-                        sprintf(pt->progress,"repairing %s",CutFsckMsg);
+                        snprintf(pt->progress,6,"repairing %s",CutFsckMsg);
                 }
                 CutFsckMsg=strtok(NULL,delim);
         }
 	fclose(log);
 }
 
+/*****************By Clover*****************************
+  fsck2lcd : a little program for pronas that will show
+fsck msg on lcd when watch dog do fsck in booting.
+
+how to use it :
+   1. need a "FIFO"  file to save fsck msg.
+   2. just only for xfs/ext3/ext4 filesystem
+   #fsck2lcd  FIFO-file  filesystem 
+Example:
+   if have a "xfs" device and pathname is /dev/zvol/VG01/testxfs .
+   we need a FIFO file ~ #mkfifo /tmp/fsck_fifo .
+   So use command:  
+   #fsck2lcd /tmp/fsck_fifo xfs
+   
+   if ext3/ext4
+   #fsck2lcd /tmp/fsck_fifo ext
+Used on:
+   check nasinit-> _watchdog_fsck()
+
+********************************************************/
+
 int main (int argc, char *argv[]){
 	struct usb_bus      *bus;
 	struct usb_device   *dev;
 	char buf_r[100];		/* buf for FIFO content*/
 	char *delim=" :=|\\-";		/* using in strtok to pass it */
+	char tmp[10];			/*just for save argv[2]*/
 	FILE *fp;				/* FIFO */
 	int wait_to_showLCD=0;		/*more smoonth to show msg on LCD*/
-	Print_To_LCD *ptl;
+	Print_To_LCD *ptl;		/* save percentage of progress and what volume has be fsck */
 	ptl = (Print_To_LCD *)malloc(sizeof(Print_To_LCD));	
 	
 	usb_init();
@@ -358,42 +415,88 @@ int main (int argc, char *argv[]){
   	/* clear display */
   	//lcd_clear();
 	
+	strcpy(tmp,argv[2]);	
+	/* fsck show on LCD code Start. by Clover*/
 	
+	if(strcmp("ext",tmp)==0)		/* ext3/4 file system */
+	{
 	
-	fp = fopen(argv[1],"r");
-    	if(fp==NULL)
-    	{
-       		perror("can't open file");
-        	exit(1);
-    	}
+		fp = fopen(argv[1],"r");
+    		if(fp==NULL)
+    		{
+       			perror("can't open file");
+        		exit(1);
+    		}
 
-    	while(1)
-    	{
-		wait_to_showLCD++;
-        	if(feof(fp))
-			break;     	        
+    		while(1)
+    		{
+			wait_to_showLCD++;
+       		 	if(feof(fp))
+				break;     	        
 		
-		fgets(buf_r,99,fp);
+			fgets(buf_r,99,fp);
 		
-		get_vol_prgs(buf_r,delim,ptl);
-		if(wait_to_showLCD == 1 )
-		{
-                        lcd_clear();
-                        lcd_write(ptl->volume);
-                        lcd_jump_sec_line();
-                        lcd_write(ptl->progress);
+			get_vol_prgs(buf_r,delim,ptl);
+			if(wait_to_showLCD == 1 )
+			{
+                	        lcd_clear();
+                        	lcd_write(ptl->volume);
+                	        lcd_jump_sec_line();
+                	        lcd_write(ptl->progress);
 
-		}
-		else if(wait_to_showLCD >= 5 )
-		{		
-			lcd_clear();
-			lcd_write(ptl->volume);
-			lcd_jump_sec_line();
-			lcd_write(ptl->progress);
-			wait_to_showLCD=0;	   
-		}
-		usleep(100000);
-    	}
+			}
+			else if(wait_to_showLCD >= 5 )
+			{		
+				lcd_clear();
+				lcd_write(ptl->volume);
+				lcd_jump_sec_line();
+				lcd_write(ptl->progress);
+				wait_to_showLCD=0;	   
+			}
+			usleep(100000);
+    		}
+	
+	}
+	else if(strcmp("xfs",tmp)==0)
+	{
+	
+		fp = fopen(argv[1],"r");
+                if(fp==NULL)
+                {
+                        perror("can't open file");
+                        exit(1);
+                }
+		memset(ptl->volume,'\0',sizeof(ptl->volume)); 		// initial '\0' 
+		memset(pt->progress,'\0',sizeof(pt->progress));
+		strncpy(ptl->volume,argv[2],29);
+                while(1)
+                {
+                        wait_to_showLCD++;
+                        if(feof(fp))
+                                break;
+
+                        fgets(buf_r,99,fp);
+			get_xfs_fsckmsg(buf_r,ptl);
+                        if(wait_to_showLCD == 1 )
+                        {
+                                lcd_clear();
+                                lcd_write("XFS");
+                                lcd_jump_sec_line();
+                                lcd_write("testing");
+
+                        }
+                        else if(wait_to_showLCD >= 5 )
+                        {
+                                lcd_clear();
+                                lcd_write("XFS");
+                                lcd_jump_sec_line();
+                                lcd_write("testing");
+                                wait_to_showLCD=0;
+                        }
+                        usleep(100000);
+                }
+	
+	}
 	lcd_clear();
 	lcd_write("Waiting booting");
         lcd_jump_sec_line();
